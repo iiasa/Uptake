@@ -399,59 +399,159 @@ p_cumulative_radial <- ggplot(cumulative_data, aes(x = scenario, y = cumulative_
     panel.grid.minor = element_blank()
   )
 
-# 6.2 Energy Biomass Impact: Difference Ribbon Plot
-p_energy_diff <- energy_data %>%
-  ggplot(aes(x = year)) +
-  geom_line(aes(y = energy_before_tc / 1e6, color = "Before Fire"), size = 1.2) +
-  geom_line(aes(y = energy_after_tc / 1e6, color = "After Fire"), size = 1.2) +
-  geom_ribbon(aes(ymin = energy_after_tc / 1e6, 
-                  ymax = energy_before_tc / 1e6,
-                  fill = "Fire Impact"), alpha = 0.5) +
-  facet_wrap(~ scenario, ncol = 3,
-             labeller = labeller(scenario = c(
-               "Mit2p6" = "2.6°C Scenario",
-               "Mit4p5" = "4.5°C Scenario",
-               "Mit7p0" = "7.0°C Scenario"
-             ))) +
+# 6.5 NEW: Combined Harvest and Energy Biomass Volume Plot (2015-2070) ───────
+# Compute energy biomass in volume units (Mm³)
+energy_data <- energy_data %>%
+  mutate(
+    energy_before_Mm3 = energy_before_tc / (conversion_factor * 1e6),
+    energy_after_Mm3 = energy_after_tc / (conversion_factor * 1e6)
+  )
+
+# Filter years to 2015-2070
+energy_data_2015_2070 <- energy_data %>%
+  filter(year <= 2070)
+
+# Create the combined plot
+p_combined_volume <- energy_data_2015_2070 %>%
+  mutate(
+    harvest_before_Mm3 = harvest_before_m3 / 1e6,
+    harvest_after_Mm3 = harvest_after_m3 / 1e6
+  ) %>%
+  select(scenario, year, 
+         harvest_before_Mm3, harvest_after_Mm3,
+         energy_before_Mm3, energy_after_Mm3) %>%
+  pivot_longer(
+    cols = -c(scenario, year),
+    names_to = "variable",
+    values_to = "volume"
+  ) %>%
+  mutate(
+    period = if_else(str_detect(variable, "before"), "Before Fire", "After Fire"),
+    type = if_else(str_detect(variable, "harvest"), "Total Harvest", "Energy Biomass"),
+    # Create a grouping variable for axis breaks
+    axis_group = if_else(type == "Total Harvest", "High", "Low")
+  ) %>%
+  # Create a fake year offset for the low values to separate them visually
+  mutate(
+    year_offset = if_else(axis_group == "Low", year + 0.3, year)
+  ) %>%
+  ggplot(aes(x = year_offset, y = volume, color = type, group = interaction(type, period))) +
+  
+  # Shaded area to represent burnt biomass
+  geom_ribbon(
+    data = . %>% 
+      group_by(scenario, year, type, axis_group) %>% 
+      filter(n() == 2) %>% 
+      arrange(desc(period)) %>% 
+      reframe(
+        x = year_offset,
+        ymin = min(volume),
+        ymax = max(volume)
+      ),
+    aes(x = x, ymin = ymin, ymax = ymax, fill = "Burnt Biomass"),
+    alpha = 0.3, color = NA, inherit.aes = FALSE
+  ) +
+  
+  # Main lines
+  geom_line(aes(linetype = period), size = 1.8, alpha = 0.95) +
+  
+  # Facet with axis breaks illusion
+  facet_grid(axis_group ~ scenario, scales = "free_y", space = "free_y",
+             labeller = labeller(
+               scenario = c(
+                 "Mit2p6" = "Mitigation 2.6°C",
+                 "Mit4p5" = "Mitigation 4.5°C",
+                 "Mit7p0" = "Mitigation 7.0°C"
+               ),
+               axis_group = c("High" = "", "Low" = "")
+             )) +
+  
+  # Scales and colors
   scale_color_manual(
-    values = c("Before Fire" = "#1a9850", "After Fire" = "#d73027"),
-    name = NULL
+    values = c("Total Harvest" = "#1a9850", "Energy Biomass" = "#4575b4"),
+    name = "Volume Type"
   ) +
-  scale_fill_manual(values = c("Fire Impact" = "#fdae61"), name = NULL) +
+  scale_fill_manual(
+    values = c("Burnt Biomass" = "#fc8d59"),
+    name = "Fire Impact"
+  ) +
+  scale_linetype_manual(
+    values = c("Before Fire" = "solid", "After Fire" = "11"),
+    name = "Period"
+  ) +
+  scale_y_continuous(
+    labels = scales::comma_format(),
+    expand = expansion(mult = c(0.05, 0.15))
+  ) +
+  scale_x_continuous(
+    breaks = seq(2020, 2070, by = 10),
+    limits = c(2015, 2070),
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  
+  # Titles and labels
   labs(
-    title = "Energy Biomass Availability Before and After Wildfires",
-    subtitle = "EU27+UK projections across scenarios (2015-2100)",
+    title = "FIRE IMPACT ON FOREST BIOMASS RESOURCES (2015-2070)",
+    subtitle = "EU27+UK projections of harvest volume and bioenergy feedstock availability",
     x = "Year",
-    y = "Energy Biomass (MtC)",
-    caption = "Using country-specific energy share factors"
+    y = "Volume (Mm³/year)",
+    caption = "Shaded areas represent biomass lost to wildfires"
   ) +
+  
+  # Theme with creative elements
   theme_minimal(base_size = 14) +
   theme(
     legend.position = "bottom",
-    plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5, size = 16),
+    legend.box = "horizontal",
+    legend.spacing.x = unit(1, "cm"),
+    plot.title = element_text(face = "bold", size = 26, hjust = 0.5, 
+                              margin = margin(b = 10), color = "#d73027"),
+    plot.subtitle = element_text(size = 18, hjust = 0.5, margin = margin(b = 20)),
+    plot.caption = element_text(hjust = 0.5, size = 12, color = "gray40"),
     panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold", size = 12)
-  )
-
-# Save the new visualization
-ggsave(file.path(results_dir, "Energy_Biomass_Difference.png"), 
-       p_energy_diff, width = 14, height = 8, dpi = 300)
-
-# Update combined report to include the new visualization
-combined_plot <- (p_harvest_line + p_energy_diff) / (p_reduction_scatter + p_cumulative_radial) +
-  plot_annotation(
-    title = "Comprehensive Fire Impact Analysis on Harvested Biomass",
-    subtitle = "EU27+UK projections across climate scenarios (2015-2100)",
-    caption = paste("Conversion factor:", conversion_factor, "tC/m³ | Country-specific energy shares"),
-    theme = theme(
-      plot.title = element_text(face = "bold", size = 24, hjust = 0.5),
-      plot.subtitle = element_text(size = 18, hjust = 0.5)
+    panel.grid.major = element_line(color = "gray90", size = 0.3),
+    strip.background = element_rect(fill = "#f0f0f0", color = "gray80"),
+    strip.text.x = element_text(face = "bold", size = 12, color = "black"),
+    strip.text.y = element_blank(),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    legend.title = element_text(face = "bold", size = 12),
+    legend.text = element_text(size = 12),
+    panel.spacing = unit(1.5, "lines"),
+    panel.border = element_rect(color = "gray80", fill = NA, size = 0.5)
+  ) +
+  
+  # Custom legend with icons
+  guides(
+    color = guide_legend(
+      override.aes = list(size = 3, shape = 15, linetype = "solid"),
+      title.position = "top",
+      title.hjust = 0.5,
+      order = 1
+    ),
+    linetype = guide_legend(
+      override.aes = list(size = 1.5, color = "black"),
+      title.position = "top",
+      title.hjust = 0.5,
+      order = 2
+    ),
+    fill = guide_legend(
+      override.aes = list(alpha = 0.3, color = NA),
+      title.position = "top",
+      title.hjust = 0.5,
+      order = 3
     )
+  ) +
+  
+  # Decade markers
+  geom_vline(
+    xintercept = seq(2020, 2070, by = 10),
+    color = "gray80",
+    linetype = "dashed",
+    alpha = 0.7
   )
-
-ggsave(file.path(results_dir, "Combined_Fire_Impact_Analysis.png"), 
-       combined_plot, width = 18, height = 16, dpi = 300)
 
 # 7. Save Enhanced Visualizations ────────────────────────────────────────────
 # Save plots
@@ -462,6 +562,10 @@ ggsave(file.path(results_dir, "Reduction_Percentage_Scatter.png"),
        p_reduction_scatter, width = 12, height = 8, dpi = 300)
 ggsave(file.path(results_dir, "Cumulative_Loss_Radial.png"), 
        p_cumulative_radial, width = 10, height = 10, dpi = 300)
+
+# Save the new combined visualization
+ggsave(file.path(results_dir, "Combined_Harvest_Energy_Volume_2015-2070.png"), 
+       p_combined_volume, width = 18, height = 10, dpi = 300)
 
 # Create combined report
 combined_plot <- (p_harvest_line + p_energy_stream) / (p_reduction_scatter + p_cumulative_radial) +

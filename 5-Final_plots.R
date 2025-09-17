@@ -1,6 +1,7 @@
 # Enhanced European Wildfire Impacts Visualization
+#   • Fixed Plot 2: NA values set to 0, improved classification
 #   • Completely redesigned Plot 5 with creative visualization
-#   • high resolution output
+#   • Ultra-high resolution output
 # ──────────────────────────────────────────────────────────────────────────────
 
 library(terra)
